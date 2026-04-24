@@ -1,0 +1,2735 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>St. Camillus Medical Center — Hospital Ticketing System</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap"
+        rel="stylesheet">
+
+    <!-- Firebase SDKs (ES Module) -->
+    <script type="module">
+        import { initializeApp }
+            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+        import {
+            getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
+            onSnapshot, query, orderBy, serverTimestamp
+        }
+            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        /* ── Firebase init ──────────────────────────────────────────────────────── */
+        const firebaseConfig = {
+            apiKey: "AIzaSyAqeeMea89yFX5VjDuI5tV6vom56usRd08",
+            authDomain: "scmc-ticketing-sys.firebaseapp.com",
+            projectId: "scmc-ticketing-sys",
+            storageBucket: "scmc-ticketing-sys.firebasestorage.app",
+            messagingSenderId: "778610485729",
+            appId: "1:778610485729:web:4d85032b20805e07f48aa0",
+            measurementId: "G-HBYSW2RGYY"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        /* ── App state ──────────────────────────────────────────────────────────── */
+        let tickets = [];
+        let selectedTicket = null;
+        let currentUser = null;
+        let searchQuery = '';
+        let statusFilter = 'all';
+        let priorityFilter = 'all';
+        let unsubTickets = null;
+
+        /* ── Language ───────────────────────────────────────────────────────────── */
+        let currentLang = 'en';
+
+        /* ── Dark mode ──────────────────────────────────────────────────────────── */
+        function initDarkMode() {
+            const saved = localStorage.getItem('scmc-dark-mode');
+            if (saved === 'true') {
+                document.body.classList.add('dark-mode');
+                updateDarkModeIcon();
+            }
+        }
+
+        window.toggleDarkMode = () => {
+            document.body.classList.toggle('dark-mode');
+            const isDark = document.body.classList.contains('dark-mode');
+            localStorage.setItem('scmc-dark-mode', isDark);
+            updateDarkModeIcon();
+        };
+
+        function updateDarkModeIcon() {
+            const isDark = document.body.classList.contains('dark-mode');
+            document.querySelectorAll('.dark-mode-toggle').forEach(btn => {
+                btn.textContent = isDark ? '☀️' : '🌙';
+                btn.title = isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+            });
+        }
+
+        // Initialize on load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initDarkMode);
+        } else {
+            initDarkMode();
+        }
+
+        const translations = {
+            en: {
+                heroBadge: '🏥 Hospital Support Portal',
+                heroTitle: 'How can we <span>help you</span> today?',
+                heroSub: 'Submit a support request and our staff will assist you as quickly as possible. Your concern goes directly to the right team.',
+                cardTitle: 'Submit a New Ticket',
+                cardSub: "Fill out a brief form and we'll follow up shortly",
+                step1: 'Fill the form',
+                step2: 'Submit request',
+                step3: 'Staff responds',
+                submitBtn: '📋 Submit a New Ticket',
+                modalTitle: 'Submit a Support Request',
+                labelName: 'Your Name *',
+                labelPid: 'Patient ID (if known)',
+                labelDept: 'Department / Ward *',
+                labelCategory: 'Issue Category *',
+                labelSummary: 'Issue Summary *',
+                labelDetails: 'Details / Notes',
+                placeholderName: 'Full name',
+                placeholderPid: 'PT-XXXXXX',
+                placeholderDept: 'Select department',
+                placeholderCategory: 'Select category',
+                placeholderSummary: 'Brief description of your concern',
+                placeholderDetails: 'Additional information or context…',
+                cancel: 'Cancel',
+                submitRequest: 'Submit Request',
+                successTitle: 'Request Submitted!',
+                successSub: 'Your ticket has been saved. Reference number:',
+                successNote: 'Please keep this reference number. Our staff will address your concern shortly.',
+                successBack: '← Submit Another Request',
+                adminLogin: '🔐 Admin Login',
+                footer: '© 2025 St. Camillus Medical Center · Hospital Ticketing System',
+            },
+            fil: {
+                heroBadge: '🏥 Portal ng Suporta ng Ospital',
+                heroTitle: 'Paano namin kayo <span>matutulungan</span> ngayon?',
+                heroSub: 'Mag-submit ng kahilingan at ang aming mga kawani ay tutugon sa inyo sa lalong madaling panahon. Ang inyong alalahanin ay mapupunta sa tamang pangkat.',
+                cardTitle: 'Mag-submit ng Bagong Ticket',
+                cardSub: 'Punan ang maikling form at tutugon kami sa lalong madaling panahon',
+                step1: 'Punan ang form',
+                step2: 'Isumite ang kahilingan',
+                step3: 'Tutugon ang kawani',
+                submitBtn: '📋 Mag-submit ng Bagong Ticket',
+                modalTitle: 'Isumite ang Kahilingan ng Suporta',
+                labelName: 'Inyong Pangalan *',
+                labelPid: 'Patient ID (kung alam)',
+                labelDept: 'Departamento / Ward *',
+                labelCategory: 'Kategorya ng Isyu *',
+                labelSummary: 'Buod ng Isyu *',
+                labelDetails: 'Mga Detalye / Tala',
+                placeholderName: 'Buong pangalan',
+                placeholderPid: 'PT-XXXXXX',
+                placeholderDept: 'Pumili ng departamento',
+                placeholderCategory: 'Pumili ng kategorya',
+                placeholderSummary: 'Maikling paglalarawan ng inyong alalahanin',
+                placeholderDetails: 'Karagdagang impormasyon o konteksto…',
+                cancel: 'Kanselahin',
+                submitRequest: 'Isumite ang Kahilingan',
+                successTitle: 'Naisumite na ang Kahilingan!',
+                successSub: 'Nai-save na ang inyong ticket. Sangguniang numero:',
+                successNote: 'Pakinggan ang sangguniang numerong ito. Tutugunan ng aming kawani ang inyong alalahanin sa lalong madaling panahon.',
+                successBack: '← Mag-submit ng Isa Pang Kahilingan',
+                adminLogin: '🔐 Login ng Admin',
+                footer: '© 2025 St. Camillus Medical Center · Sistemang Pagtatiketing ng Ospital',
+            }
+        };
+
+        window.setLang = lang => {
+            currentLang = lang;
+            const t = translations[lang];
+            // Toggle active button state
+            document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+            // Update footer
+            const footerEl = document.getElementById('public-footer');
+            if (footerEl) footerEl.textContent = t.footer;
+            // Update admin login btn
+            const loginBtn = document.getElementById('admin-login-btn');
+            if (loginBtn) loginBtn.textContent = t.adminLogin;
+            // Re-render hero content
+            resetPublicPageHTML();
+        };
+
+        /* ── Helpers ────────────────────────────────────────────────────────────── */
+        const nowStr = () => new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const timeStr = () => new Date().toTimeString().slice(0, 5);
+        const genId = () => 'TKT-' + Date.now().toString(36).toUpperCase();
+        const genPid = () => 'PT-' + Math.floor(100000 + Math.random() * 900000);
+
+        /* ── Auth state ─────────────────────────────────────────────────────────── */
+        onAuthStateChanged(auth, user => {
+            currentUser = user;
+            if (user) {
+                // update sidebar avatar/name
+                const nameEl = document.getElementById('admin-name');
+                const avatarEl = document.getElementById('admin-avatar');
+                if (nameEl) nameEl.textContent = user.displayName || user.email;
+                if (avatarEl) avatarEl.textContent = (user.displayName || user.email || 'A')[0].toUpperCase();
+                showAdminApp();
+            } else {
+                showPatientPage();
+            }
+        });
+
+        /* ── Firestore live listener ────────────────────────────────────────────── */
+        function subscribeTickets() {
+            if (unsubTickets) unsubTickets();
+            const q = query(collection(db, 'tickets'), orderBy('createdAt', 'desc'));
+            unsubTickets = onSnapshot(q, snap => {
+                tickets = snap.docs.map(d => ({ _docId: d.id, ...d.data() }));
+                refreshActiveView();
+            }, err => {
+                console.error(err);
+                showToast('⚠️ Firestore error: ' + err.message);
+            });
+        }
+        function unsubscribeTickets() { if (unsubTickets) { unsubTickets(); unsubTickets = null; } }
+
+        function refreshActiveView() {
+            const title = document.getElementById('page-title')?.textContent;
+            if (title === 'Dashboard') renderDashboard();
+            else renderTickets();
+            const ocEl = document.getElementById('open-count');
+            if (ocEl) {
+                const n = tickets.filter(t => t.status === 'open').length;
+                ocEl.textContent = n || '';
+            }
+        }
+
+        /* ── Page switches ──────────────────────────────────────────────────────── */
+        function showPatientPage() {
+            unsubscribeTickets();
+            document.getElementById('patient-page').style.display = '';
+            document.getElementById('admin-app').classList.remove('show');
+            resetPublicPageHTML();
+        }
+        function showAdminApp() {
+            document.getElementById('patient-page').style.display = 'none';
+            document.getElementById('admin-app').classList.add('show');
+            document.getElementById('page-title').textContent = 'Dashboard';
+            subscribeTickets();
+        }
+
+        /* ── Login ──────────────────────────────────────────────────────────────── */
+        window.openLoginModal = () => {
+            document.getElementById('login-overlay').classList.add('show');
+            document.getElementById('login-error').classList.remove('show');
+            document.getElementById('login-user').value = '';
+            document.getElementById('login-pass').value = '';
+            setTimeout(() => document.getElementById('login-user').focus(), 100);
+        };
+        window.closeLoginModal = () => document.getElementById('login-overlay').classList.remove('show');
+        window.closeLoginOutside = e => { if (e.target.id === 'login-overlay') window.closeLoginModal(); };
+
+        window.doLogin = async () => {
+            const email = document.getElementById('login-user').value.trim();
+            const pass = document.getElementById('login-pass').value;
+            const errEl = document.getElementById('login-error');
+            const btn = document.querySelector('.login-btn');
+            errEl.classList.remove('show');
+
+            if (!email || !pass) {
+                errEl.textContent = '⚠️ Please enter your email and password.';
+                errEl.classList.add('show'); return;
+            }
+            btn.textContent = 'Signing in…'; btn.disabled = true;
+            try {
+                await signInWithEmailAndPassword(auth, email, pass);
+                window.closeLoginModal();
+                showToast('✅ Welcome back!');
+            } catch (err) {
+                const msgs = {
+                    'auth/invalid-credential': '⚠️ Invalid email or password.',
+                    'auth/user-not-found': '⚠️ No account found with that email.',
+                    'auth/wrong-password': '⚠️ Incorrect password.',
+                    'auth/invalid-email': '⚠️ Please enter a valid email address.',
+                    'auth/too-many-requests': '⚠️ Too many attempts. Try again later.',
+                };
+                errEl.textContent = msgs[err.code] || ('⚠️ ' + err.message);
+                errEl.classList.add('show');
+                document.getElementById('login-pass').value = '';
+            } finally {
+                btn.textContent = 'Sign In →'; btn.disabled = false;
+            }
+        };
+
+        window.doLogout = async () => {
+            await signOut(auth);
+            showToast('👋 Signed out');
+        };
+
+        /* ── Patient ticket submit ──────────────────────────────────────────────── */
+        window.openPatientModal = () => document.getElementById('patient-modal-overlay').classList.add('show');
+        window.closePatientModal = () => {
+            document.getElementById('patient-modal-overlay').classList.remove('show');
+            ['p-patient', 'p-pid', 'p-title', 'p-desc'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            ['p-dept', 'p-category'].forEach(id => { const el = document.getElementById(id); if (el) el.selectedIndex = 0; });
+        };
+        window.closePatientOutside = e => { if (e.target.id === 'patient-modal-overlay') window.closePatientModal(); };
+
+        window.submitPatientTicket = async () => {
+            const patient = document.getElementById('p-patient').value.trim();
+            const pid = document.getElementById('p-pid').value.trim() || genPid();
+            const dept = document.getElementById('p-dept').value;
+            const category = document.getElementById('p-category').value;
+            const title = document.getElementById('p-title').value.trim();
+            const desc = document.getElementById('p-desc').value.trim();
+
+            if (!patient || !dept || !category || !title) {
+                showToast('⚠️ Please fill in all required fields.'); return;
+            }
+            const btn = document.querySelector('#patient-modal-overlay .btn-primary');
+            btn.textContent = 'Submitting…'; btn.disabled = true;
+            const id = genId();
+            try {
+                await addDoc(collection(db, 'tickets'), {
+                    id, patient, pid, dept,
+                    priority: 'medium',
+                    category, title,
+                    desc: desc || 'No additional details provided.',
+                    status: 'open',
+                    assignee: 'Unassigned',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                    createdStr: nowStr(),
+                    updatedStr: nowStr(),
+                    timeline: [{ icon: '🎫', label: 'Ticket submitted by patient', by: patient, time: timeStr() }]
+                });
+                window.closePatientModal();
+                showSuccessScreen(id);
+            } catch (err) {
+                console.error(err);
+                showToast('❌ Failed to submit. Check your connection.');
+            } finally {
+                btn.textContent = 'Submit Request'; btn.disabled = false;
+            }
+        };
+
+        function showSuccessScreen(id) {
+            const t = translations[currentLang];
+            document.getElementById('public-hero-content').innerHTML = `
+    <div class="success-card">
+      <div class="success-icon">✅</div>
+      <div class="success-title">${t.successTitle}</div>
+      <div class="success-sub">${t.successSub}</div>
+      <div class="success-id">${id}</div>
+      <div class="success-note">${t.successNote}</div>
+      <button class="success-back-btn" onclick="resetPublicPage()">← ${t.successBack}</button>
+    </div>`;
+        }
+        window.resetPublicPage = resetPublicPageHTML;
+        function resetPublicPageHTML() {
+            const el = document.getElementById('public-hero-content');
+            if (!el) return;
+            const t = translations[currentLang];
+            el.innerHTML = `
+    <div class="hero-badge">${t.heroBadge}</div>
+    <h1 class="hero-title">${t.heroTitle}</h1>
+    <p class="hero-sub">${t.heroSub}</p>
+    <div class="submit-card">
+      <div class="submit-card-title">${t.cardTitle}</div>
+      <div class="submit-card-sub">${t.cardSub}</div>
+      <div class="steps-row">
+        <div class="step-item"><div class="step-num">1</div><div class="step-label">${t.step1}</div></div>
+        <div class="step-item"><div class="step-num">2</div><div class="step-label">${t.step2}</div></div>
+        <div class="step-item"><div class="step-num">3</div><div class="step-label">${t.step3}</div></div>
+      </div>
+      <button class="public-submit-btn" onclick="openPatientModal()">${t.submitBtn}</button>
+    </div>`;
+            // Also update the patient modal labels
+            const fields = {
+                'lbl-p-patient': t.labelName,
+                'lbl-p-pid': t.labelPid,
+                'lbl-p-dept': t.labelDept,
+                'lbl-p-category': t.labelCategory,
+                'lbl-p-title': t.labelSummary,
+                'lbl-p-desc': t.labelDetails,
+            };
+            Object.entries(fields).forEach(([id, val]) => { const el = document.getElementById(id); if (el) el.textContent = val; });
+            const placeholders = {
+                'p-patient': t.placeholderName,
+                'p-pid': t.placeholderPid,
+                'p-title': t.placeholderSummary,
+                'p-desc': t.placeholderDetails,
+            };
+            Object.entries(placeholders).forEach(([id, val]) => { const el = document.getElementById(id); if (el) el.placeholder = val; });
+            const modalTitleEl = document.getElementById('patient-modal-title');
+            if (modalTitleEl) modalTitleEl.textContent = t.modalTitle;
+            const cancelBtn = document.getElementById('patient-cancel-btn');
+            if (cancelBtn) cancelBtn.textContent = t.cancel;
+            const submitBtn = document.getElementById('patient-submit-btn');
+            if (submitBtn) submitBtn.textContent = t.submitRequest;
+            // Dept/category first options
+            const deptEl = document.getElementById('p-dept');
+            if (deptEl) deptEl.options[0].text = t.placeholderDept;
+            const catEl = document.getElementById('p-category');
+            if (catEl) catEl.options[0].text = t.placeholderCategory;
+        }
+
+        /* ── Admin nav ──────────────────────────────────────────────────────────── */
+        window.navigate = (page, ev) => {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            if (ev && ev.currentTarget) ev.currentTarget.classList.add('active');
+            document.getElementById('page-title').textContent = page === 'dashboard' ? 'Dashboard' : 'All Tickets';
+            if (page === 'dashboard') renderDashboard(); else renderTickets();
+        };
+
+        /* ── Dashboard ──────────────────────────────────────────────────────────── */
+        function renderDashboard() {
+            const open = tickets.filter(t => t.status === 'open').length;
+            const inprog = tickets.filter(t => t.status === 'inprogress').length;
+            const resolved = tickets.filter(t => t.status === 'resolved').length;
+            const critical = tickets.filter(t => t.priority === 'critical').length;
+            const mc = document.getElementById('main-content'); if (!mc) return;
+            mc.innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card blue"><div class="stat-icon">🎫</div><div class="stat-value">${open}</div><div class="stat-label">Open Tickets</div><div class="stat-change up">Active requests</div></div>
+      <div class="stat-card red"><div class="stat-icon">🚨</div><div class="stat-value">${critical}</div><div class="stat-label">Critical Priority</div><div class="stat-change down">Immediate attention</div></div>
+      <div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-value">${inprog}</div><div class="stat-label">In Progress</div><div class="stat-change">Active resolutions</div></div>
+      <div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-value">${resolved}</div><div class="stat-label">Resolved</div><div class="stat-change up">↑ Good response rate</div></div>
+    </div>
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <div><div class="panel-title">Recent Tickets</div><div class="panel-subtitle">Latest submissions</div></div>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('tickets',null)">View All →</button>
+        </div>
+        ${tickets.length ? renderTicketTable(tickets.slice(0, 5), false) : '<div class="empty-state">No tickets yet</div>'}
+      </div>
+      <div class="panel">
+        <div class="panel-header"><div><div class="panel-title">Priority Queue</div><div class="panel-subtitle">Needs immediate attention</div></div></div>
+        <div>
+          ${tickets.filter(t => t.status !== 'closed' && t.status !== 'resolved')
+                    .sort((a, b) => ['critical', 'high', 'medium', 'low'].indexOf(a.priority) - ['critical', 'high', 'medium', 'low'].indexOf(b.priority))
+                    .map(t => `
+            <div class="queue-item" onclick="navigate('tickets',null);setTimeout(()=>showDetail('${t._docId}'),80)">
+              <div class="queue-prio prio-${t.priority}"></div>
+              <div class="queue-info">
+                <div class="queue-name">${t.patient}</div>
+                <div class="queue-dept">${t.dept} · ${t.category}</div>
+                <div class="queue-time">🕐 ${(t.createdStr || '').split(' ')[1] || ''}</div>
+              </div>
+              <div class="queue-meta">${badgePriority(t.priority)}</div>
+            </div>`).join('') || '<div class="empty-state">🎉 No urgent tickets</div>'}
+        </div>
+      </div>
+    </div>`;
+        }
+
+        /* ── Tickets view ───────────────────────────────────────────────────────── */
+        function renderTickets() {
+            selectedTicket = null;
+            let f = [...tickets];
+            if (statusFilter !== 'all') f = f.filter(t => t.status === statusFilter);
+            if (priorityFilter !== 'all') f = f.filter(t => t.priority === priorityFilter);
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                f = f.filter(t => (t.patient || '').toLowerCase().includes(q) || (t.id || '').toLowerCase().includes(q) || (t.title || '').toLowerCase().includes(q));
+            }
+            const mc = document.getElementById('main-content'); if (!mc) return;
+            mc.innerHTML = `
+    <div class="two-col" style="height:calc(100vh - 120px);">
+      <div class="panel" style="display:flex;flex-direction:column;overflow:hidden;">
+        <div class="filter-bar">
+          <input class="search-input" placeholder="🔍  Search tickets, patients…" oninput="onSearch(this.value)" value="${searchQuery}">
+          <select class="filter-select" onchange="onStatusFilter(this.value)">
+            <option value="all">All Status</option>
+            <option value="open"${statusFilter === 'open' ? ' selected' : ''}>Open</option>
+            <option value="inprogress"${statusFilter === 'inprogress' ? ' selected' : ''}>In Progress</option>
+            <option value="resolved"${statusFilter === 'resolved' ? ' selected' : ''}>Resolved</option>
+            <option value="closed"${statusFilter === 'closed' ? ' selected' : ''}>Closed</option>
+          </select>
+          <select class="filter-select" onchange="onPriorityFilter(this.value)">
+            <option value="all">All Priority</option>
+            <option value="critical"${priorityFilter === 'critical' ? ' selected' : ''}>Critical</option>
+            <option value="high"${priorityFilter === 'high' ? ' selected' : ''}>High</option>
+            <option value="medium"${priorityFilter === 'medium' ? ' selected' : ''}>Medium</option>
+            <option value="low"${priorityFilter === 'low' ? ' selected' : ''}>Low</option>
+          </select>
+        </div>
+        <div style="overflow-y:auto;flex:1;">
+          ${f.length ? renderTicketTable(f, true) : '<div class="empty-state">🔍 No tickets found</div>'}
+        </div>
+      </div>
+      <div class="panel" style="overflow-y:auto;" id="detail-panel">
+        <div class="detail-empty"><div class="icon">🎫</div><div style="font-weight:600;color:var(--text2)">No ticket selected</div><div style="font-size:12px;">Click a ticket to view details</div></div>
+      </div>
+    </div>`;
+        }
+        window.onSearch = v => { searchQuery = v; renderTickets(); };
+        window.onStatusFilter = v => { statusFilter = v; renderTickets(); };
+        window.onPriorityFilter = v => { priorityFilter = v; renderTickets(); };
+
+        function renderTicketTable(list, clickable) {
+            return `<table class="ticket-table">
+    <thead><tr><th>Ticket ID</th><th>Patient</th><th>Department</th><th>Priority</th><th>Status</th><th>Updated</th></tr></thead>
+    <tbody>
+      ${list.map(t => `
+        <tr class="ticket-row${selectedTicket?._docId === t._docId ? ' selected' : ''}" onclick="${clickable ? `showDetail('${t._docId}')` : `navigate('tickets',null)`}">
+          <td><div class="ticket-id">${t.id}</div></td>
+          <td><div class="ticket-patient">${t.patient}</div><div class="ticket-detail">${t.pid}</div></td>
+          <td><span class="dept-badge">${t.dept}</span></td>
+          <td>${badgePriority(t.priority)}</td>
+          <td>${badgeStatus(t.status)}</td>
+          <td><div class="ticket-detail">${(t.updatedStr || '').split(' ')[1] || ''}</div></td>
+        </tr>`).join('')}
+    </tbody></table>`;
+        }
+
+        /* ── Detail panel ───────────────────────────────────────────────────────── */
+        window.showDetail = docId => {
+            const t = tickets.find(x => x._docId === docId);
+            if (!t) return;
+            selectedTicket = t;
+            document.querySelectorAll('.ticket-row').forEach(r => {
+                r.classList.toggle('selected', r.textContent.includes(t.id));
+            });
+            const panel = document.getElementById('detail-panel'); if (!panel) return;
+            panel.innerHTML = `
+    <div class="detail-content">
+      <div class="detail-header">
+        <div>
+          <div class="detail-ticket-id">${t.id}</div>
+          <div class="detail-title">${t.title}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-direction:column;align-items:flex-end;">
+          ${badgePriority(t.priority)}${badgeStatus(t.status)}
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-label">Patient Info</div>
+        <div class="detail-grid">
+          <div class="detail-field"><label>Patient Name</label><div class="value">${t.patient}</div></div>
+          <div class="detail-field"><label>Patient ID</label><div class="value">${t.pid}</div></div>
+          <div class="detail-field"><label>Department</label><div class="value">${t.dept}</div></div>
+          <div class="detail-field"><label>Category</label><div class="value">${t.category}</div></div>
+          <div class="detail-field"><label>Created</label><div class="value">${t.createdStr || ''}</div></div>
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-label">Priority</div>
+        <select class="priority-select" onchange="changePriority('${t._docId}', this.value)">
+          <option value="critical"${t.priority === 'critical' ? ' selected' : ''}>🔴 Critical</option>
+          <option value="high"${t.priority === 'high' ? ' selected' : ''}>🟠 High</option>
+          <option value="medium"${t.priority === 'medium' ? ' selected' : ''}>🟡 Medium</option>
+          <option value="low"${t.priority === 'low' ? ' selected' : ''}>🟢 Low</option>
+        </select>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-label">Description</div>
+        <div class="detail-desc">${t.desc}</div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-section-label">Activity Timeline</div>
+        <div class="timeline">
+          ${(t.timeline || []).map((item, i) => `
+            <div class="timeline-item">
+              <div class="timeline-dot ${i === t.timeline.length - 1 ? 'active' : ''}">${item.icon}</div>
+              <div class="timeline-body">
+                <div class="timeline-action">${item.label}</div>
+                <div class="timeline-meta">by ${item.by} · ${item.time}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="action-row">
+        ${t.status !== 'inprogress' && t.status !== 'resolved' && t.status !== 'closed' ? `<button class="btn btn-secondary btn-sm" onclick="updateStatus('${t._docId}','inprogress')">▶ Start</button>` : ''}
+        ${t.status !== 'resolved' && t.status !== 'closed' ? `<button class="btn btn-primary btn-sm" onclick="updateStatus('${t._docId}','resolved')">✓ Resolve</button>` : ''}
+        ${t.status === 'resolved' ? `<button class="btn btn-secondary btn-sm" onclick="updateStatus('${t._docId}','closed')">🔒 Close</button>` : ''}
+        ${t.status !== 'closed' ? `<button class="btn btn-danger btn-sm" onclick="deleteTicket('${t._docId}')">🗑 Delete</button>` : ''}
+      </div>
+    </div>`;
+        };
+
+        /* ── Priority update ────────────────────────────────────────────────────── */
+        window.changePriority = async (docId, newPriority) => {
+            const t = tickets.find(x => x._docId === docId); if (!t) return;
+            const labels = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+            const icons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' };
+            const who = currentUser?.displayName || currentUser?.email || 'Admin';
+            const newTimeline = [...(t.timeline || []), {
+                icon: icons[newPriority] || '📋',
+                label: `Priority changed to ${labels[newPriority] || newPriority}`,
+                by: who, time: timeStr()
+            }];
+            try {
+                await updateDoc(doc(db, 'tickets', docId), {
+                    priority: newPriority, updatedAt: serverTimestamp(), updatedStr: nowStr(), timeline: newTimeline
+                });
+                showToast(`${icons[newPriority]} Ticket ${t.id} priority set to ${labels[newPriority]}`);
+            } catch (err) { showToast('❌ Update failed: ' + err.message); }
+        };
+
+        /* ── Status update ──────────────────────────────────────────────────────── */
+        window.updateStatus = async (docId, newStatus) => {
+            const t = tickets.find(x => x._docId === docId); if (!t) return;
+            const labels = { inprogress: 'In Progress', resolved: 'Resolved', closed: 'Closed' };
+            const icons = { inprogress: '🔄', resolved: '✅', closed: '🔒' };
+            const who = currentUser?.displayName || currentUser?.email || 'Admin';
+            const newTimeline = [...(t.timeline || []), {
+                icon: icons[newStatus] || '📋',
+                label: `Status changed to ${labels[newStatus] || newStatus}`,
+                by: who, time: timeStr()
+            }];
+            try {
+                await updateDoc(doc(db, 'tickets', docId), {
+                    status: newStatus, updatedAt: serverTimestamp(), updatedStr: nowStr(), timeline: newTimeline
+                });
+                showToast(`${icons[newStatus]} Ticket ${t.id} marked as ${labels[newStatus]}`);
+            } catch (err) { showToast('❌ Update failed: ' + err.message); }
+        };
+
+        /* ── Delete ─────────────────────────────────────────────────────────────── */
+        window.deleteTicket = async docId => {
+            const t = tickets.find(x => x._docId === docId);
+            if (!confirm(`Delete ticket ${t?.id}? This cannot be undone.`)) return;
+            try {
+                await deleteDoc(doc(db, 'tickets', docId));
+                selectedTicket = null;
+                showToast('🗑 Ticket deleted');
+                renderTickets();
+            } catch (err) { showToast('❌ Delete failed: ' + err.message); }
+        };
+
+        /* ── Admin create ticket ────────────────────────────────────────────────── */
+        window.openAdminModal = () => document.getElementById('modal-overlay').classList.add('show');
+        window.closeModal = () => {
+            document.getElementById('modal-overlay').classList.remove('show');
+            ['f-patient', 'f-pid', 'f-title', 'f-desc'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            ['f-dept', 'f-priority', 'f-category'].forEach(id => { const el = document.getElementById(id); if (el) el.selectedIndex = 0; });
+        };
+        window.closeModalOutside = e => { if (e.target.id === 'modal-overlay') window.closeModal(); };
+
+        window.createTicket = async () => {
+            const patient = document.getElementById('f-patient').value.trim();
+            const pid = document.getElementById('f-pid').value.trim() || genPid();
+            const dept = document.getElementById('f-dept').value;
+            const priority = document.getElementById('f-priority').value;
+            const category = document.getElementById('f-category').value;
+            const title = document.getElementById('f-title').value.trim();
+            const desc = document.getElementById('f-desc').value.trim();
+            if (!patient || !dept || !priority || !category || !title) { showToast('⚠️ Please fill in all required fields.'); return; }
+            const btn = document.querySelector('#modal-overlay .btn-primary');
+            btn.textContent = 'Creating…'; btn.disabled = true;
+            const id = genId();
+            const who = currentUser?.displayName || currentUser?.email || 'Admin';
+            try {
+                await addDoc(collection(db, 'tickets'), {
+                    id, patient, pid, dept, priority, category, title,
+                    desc: desc || 'No additional details provided.',
+                    status: 'open',
+                    assignee: 'Unassigned',
+                    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+                    createdStr: nowStr(), updatedStr: nowStr(),
+                    timeline: [{ icon: '🎫', label: 'Ticket created', by: who, time: timeStr() }]
+                });
+                window.closeModal();
+                showToast(`✅ Ticket ${id} created`);
+                searchQuery = ''; statusFilter = 'all'; priorityFilter = 'all';
+                document.getElementById('page-title').textContent = 'All Tickets';
+                renderTickets();
+            } catch (err) { showToast('❌ Failed to create: ' + err.message); }
+            finally { btn.textContent = 'Create Ticket'; btn.disabled = false; }
+        };
+
+        /* ── Badges ─────────────────────────────────────────────────────────────── */
+        function badgePriority(p) {
+            const m = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+            return `<span class="badge priority-${p}"><span class="badge-dot"></span>${m[p] || p}</span>`;
+        }
+        function badgeStatus(s) {
+            const m = { open: 'Open', inprogress: 'In Progress', resolved: 'Resolved', closed: 'Closed' };
+            return `<span class="badge status-${s}">${m[s] || s}</span>`;
+        }
+
+        /* ── Toast ──────────────────────────────────────────────────────────────── */
+        let toastTimer;
+        window.showToast = msg => {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            t.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+        };
+    </script>
+
+    <style>
+        /* Dark mode */
+        body.dark-mode {
+            --bg: #1A1A1A;
+            --surface: #242424;
+            --surface2: #2A2A2A;
+            --border: #3A3A3A;
+            --border2: #4A4A4A;
+            --text: #E8E8E8;
+            --text2: #A8A8A8;
+            --text3: #787878;
+            --accent: #4A90D9;
+            --accent-light: #1E3A5F;
+            --accent2: #E74C3C;
+            --accent2-light: #3D1F1F;
+            --green: #2ECC71;
+            --green-light: #1A3D2A;
+            --amber: #F1C40F;
+            --amber-light: #3D3520;
+            --purple: #9B59B6;
+            --purple-light: #2E1F3D;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .3);
+            --shadow-lg: 0 8px 40px rgba(0, 0, 0, .5);
+        }
+
+        body.dark-mode .public-header {
+            background: #111;
+        }
+
+        body.dark-mode .public-header::after {
+            background: linear-gradient(160deg, #0A0A0A 0%, #111 60%);
+        }
+
+        body.dark-mode .public-hero {
+            background: linear-gradient(145deg, #0F1419 0%, #1A1A1A 60%);
+        }
+
+        body.dark-mode .hero-badge {
+            background: #1E3A5F;
+            color: #4A90D9;
+            border-color: #2A4A6F;
+        }
+
+        body.dark-mode .hero-title {
+            color: #E8E8E8;
+        }
+
+        body.dark-mode .hero-title span {
+            color: #4A90D9;
+        }
+
+        body.dark-mode .hero-sub {
+            color: #A8A8A8;
+        }
+
+        body.dark-mode .submit-card {
+            background: #242424;
+            border-color: #3A3A3A;
+        }
+
+        body.dark-mode .submit-card-title {
+            color: #E8E8E8;
+        }
+
+        body.dark-mode .submit-card-sub {
+            color: #787878;
+        }
+
+        body.dark-mode .step-item {
+            background: #2A2A2A;
+            border-color: #3A3A3A;
+        }
+
+        body.dark-mode .step-label {
+            color: #A8A8A8;
+        }
+
+        body.dark-mode .public-submit-btn {
+            background: #4A90D9;
+        }
+
+        body.dark-mode .public-submit-btn:hover {
+            background: #3A7BC8;
+        }
+
+        body.dark-mode .public-footer {
+            background: #1A1A1A;
+            border-top-color: #3A3A3A;
+            color: #787878;
+        }
+
+        body.dark-mode .sidebar {
+            background: #111;
+        }
+
+        body.dark-mode .sidebar::before {
+            background: linear-gradient(160deg, #0A0A0A 0%, #111 60%);
+        }
+
+        body.dark-mode .topbar {
+            border-bottom-color: #333;
+        }
+
+        body.dark-mode .login-overlay,
+        body.dark-mode .patient-modal-overlay,
+        body.dark-mode .modal-overlay {
+            background: rgba(0, 0, 0, .7);
+        }
+
+        body.dark-mode .dept-badge {
+            border-color: #444;
+        }
+
+        body.dark-mode .priority-high {
+            background: #3D2A1A;
+            color: #E67E22;
+        }
+
+        body.dark-mode .priority-high .badge-dot {
+            background: #E67E22;
+        }
+
+        body.dark-mode .status-closed {
+            background: #2A2A2A;
+            color: #666;
+        }
+
+        body.dark-mode .firebase-badge {
+            background: #2A2015;
+            color: #F39C12;
+            border-color: #5A4020;
+        }
+
+        body.dark-mode ::-webkit-scrollbar-thumb {
+            background: #444;
+        }
+
+        body.dark-mode .success-back-btn:hover {
+            background: #3A7BC8;
+        }
+
+        body.dark-mode .success-card {
+            background: #242424;
+            border-color: #3A3A3A;
+        }
+
+        body.dark-mode .success-title {
+            color: #E8E8E8;
+        }
+
+        body.dark-mode .success-sub {
+            color: #A8A8A8;
+        }
+
+        body.dark-mode .success-id {
+            color: #4A90D9;
+        }
+
+        body.dark-mode .success-note {
+            color: #787878;
+        }
+
+        body.dark-mode .success-back-btn {
+            background: #4A90D9;
+        }
+
+        body.dark-mode .success-back-btn:hover {
+            background: #3A7BC8;
+        }
+
+        body.dark-mode .patient-modal {
+            background: #242424;
+            border-color: #3A3A3A;
+        }
+
+        body.dark-mode .patient-modal-title {
+            color: #E8E8E8;
+        }
+
+        body.dark-mode .patient-modal label {
+            color: #A8A8A8;
+        }
+
+        body.dark-mode .admin-login-btn {
+            background: rgba(74, 144, 217, .12);
+            border-color: rgba(74, 144, 217, .3);
+            color: #4A90D9;
+        }
+
+        body.dark-mode .admin-login-btn:hover {
+            background: rgba(74, 144, 217, .2);
+            border-color: rgba(74, 144, 217, .4);
+        }
+
+        body.dark-mode .lang-switcher {
+            background: rgba(255, 255, 255, .1);
+            border-color: rgba(255, 255, 255, .2);
+        }
+
+        body.dark-mode .lang-btn {
+            color: rgba(255, 255, 255, .6);
+        }
+
+        body.dark-mode .lang-btn:hover {
+            color: rgba(255, 255, 255, .9);
+        }
+
+        body.dark-mode .lang-btn.active {
+            background: rgba(74, 144, 217, .25);
+            color: #4A90D9;
+        }
+
+        body.dark-mode .login-btn:hover {
+            background: #3A7BC8;
+        }
+
+        body.dark-mode .btn-primary:hover {
+            background: #3A7BC8;
+        }
+
+        body.dark-mode .topbar-actions .dark-mode-toggle {
+            border-color: #444;
+            background: #2A2A2A;
+            color: #A8A8A8;
+        }
+
+        body.dark-mode .topbar-actions .dark-mode-toggle:hover {
+            background: #333;
+            color: #FFD700;
+        }
+
+        /* Dark mode toggle button */
+        .dark-mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, .15);
+            background: rgba(255, 255, 255, .08);
+            color: rgba(255, 255, 255, .7);
+            font-size: 18px;
+            cursor: pointer;
+            transition: all .2s;
+            padding: 0;
+        }
+
+        .dark-mode-toggle:hover {
+            background: rgba(255, 255, 255, .15);
+            color: #fff;
+            transform: rotate(15deg);
+        }
+
+        body.dark-mode .dark-mode-toggle {
+            border-color: rgba(255, 255, 255, .2);
+            background: rgba(255, 255, 255, .1);
+            color: #FFD700;
+        }
+
+        /* Smooth transitions for dark mode */
+        body,
+        .public-header,
+        .sidebar,
+        .sidebar::before,
+        .topbar,
+        .panel,
+        .stat-card,
+        .modal,
+        .login-box,
+        .submit-card,
+        .success-card,
+        .ticket-table,
+        .filter-bar,
+        .search-input,
+        select,
+        textarea,
+        input,
+        .detail-content,
+        .timeline-dot,
+        .queue-item,
+        .form-field input,
+        .form-field select,
+        .form-field textarea,
+        .priority-select,
+        .detail-desc,
+        .step-item,
+        .hero-badge,
+        .badge,
+        .dept-badge,
+        .firebase-badge,
+        .admin-login-btn,
+        .dark-mode-toggle {
+            transition: background-color 0.3s ease, color 0.3s ease,
+                border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        :root {
+            --bg: #F5F3EE;
+            --surface: #FFF;
+            --surface2: #FAFAF8;
+            --border: #E8E4DC;
+            --border2: #D6D0C4;
+            --text: #1A1714;
+            --text2: #6B6560;
+            --text3: #9C9690;
+            --accent: #1B4F72;
+            --accent-light: #D6E8F5;
+            --accent2: #C0392B;
+            --accent2-light: #FADBD8;
+            --green: #1E6F4A;
+            --green-light: #D5F0E3;
+            --amber: #B7770D;
+            --amber-light: #FEF3CD;
+            --purple: #6B3FA0;
+            --purple-light: #EDE0F8;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .06);
+            --shadow-lg: 0 8px 40px rgba(0, 0, 0, .1);
+            --radius: 12px;
+            --radius-sm: 8px
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            font-size: 14px;
+            line-height: 1.5
+        }
+
+        /* PUBLIC */
+        #patient-page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(145deg, #EAF4FB 0%, #F5F3EE 60%)
+        }
+
+        .public-header {
+            background: var(--text);
+            padding: 0 40px;
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative
+        }
+
+        .public-header::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(160deg, #1A2A3A 0%, #1A1714 60%);
+            z-index: 0
+        }
+
+        .public-header>* {
+            position: relative;
+            z-index: 1
+        }
+
+        /* Replaced MedQueue branding with SCMC full name */
+        .pub-logo-mark {
+            font-family: 'DM Serif Display', serif;
+            font-size: 19px;
+            color: #fff;
+            letter-spacing: -.3px;
+            line-height: 1.2
+        }
+
+        .pub-logo-mark span {
+            color: #6BC4E8
+        }
+
+        .pub-logo-sub {
+            font-size: 10px;
+            color: rgba(255, 255, 255, .35);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 3px
+        }
+
+        .admin-login-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 18px;
+            background: rgba(107, 196, 232, .12);
+            border: 1px solid rgba(107, 196, 232, .3);
+            border-radius: var(--radius-sm);
+            color: #6BC4E8;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all .18s;
+            font-family: 'DM Sans', sans-serif
+        }
+
+        .admin-login-btn:hover {
+            background: rgba(107, 196, 232, .22);
+            border-color: rgba(107, 196, 232, .55);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(107, 196, 232, .15)
+        }
+
+        .public-hero {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 24px 40px;
+            text-align: center
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--accent-light);
+            color: var(--accent);
+            border: 1px solid #B0D4EE;
+            border-radius: 99px;
+            padding: 5px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 22px
+        }
+
+        .hero-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 42px;
+            color: var(--text);
+            line-height: 1.15;
+            max-width: 540px;
+            margin-bottom: 14px
+        }
+
+        .hero-title span {
+            color: var(--accent)
+        }
+
+        .hero-sub {
+            font-size: 15px;
+            color: var(--text2);
+            max-width: 420px;
+            margin-bottom: 38px;
+            line-height: 1.65
+        }
+
+        .submit-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-lg);
+            padding: 36px 40px;
+            max-width: 460px;
+            width: 100%;
+            text-align: left
+        }
+
+        .submit-card-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            color: var(--text);
+            margin-bottom: 4px
+        }
+
+        .submit-card-sub {
+            font-size: 13px;
+            color: var(--text3);
+            margin-bottom: 22px
+        }
+
+        .steps-row {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 26px
+        }
+
+        .step-item {
+            flex: 1;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            text-align: center
+        }
+
+        .step-num {
+            width: 24px;
+            height: 24px;
+            background: var(--accent);
+            color: #fff;
+            border-radius: 50%;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 6px
+        }
+
+        .step-label {
+            font-size: 11px;
+            color: var(--text2);
+            font-weight: 500
+        }
+
+        .public-submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all .18s
+        }
+
+        .public-submit-btn:hover {
+            background: #163D5A;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(27, 79, 114, .28)
+        }
+
+        .public-footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: var(--text3);
+            border-top: 1px solid var(--border)
+        }
+
+        /* LOGIN */
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(26, 23, 20, .6);
+            backdrop-filter: blur(6px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 200
+        }
+
+        .login-overlay.show {
+            display: flex
+        }
+
+        .login-box {
+            background: var(--surface);
+            border-radius: 20px;
+            width: 380px;
+            max-width: 95vw;
+            box-shadow: var(--shadow-lg);
+            padding: 36px 32px 32px;
+            animation: slideUp .22s ease;
+            position: relative
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(18px);
+                opacity: 0
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1
+            }
+        }
+
+        .login-logo {
+            text-align: center;
+            margin-bottom: 22px
+        }
+
+        .login-logo-mark {
+            font-family: 'DM Serif Display', serif;
+            font-size: 18px;
+            color: var(--text);
+            line-height: 1.3
+        }
+
+        .login-logo-mark span {
+            color: var(--accent)
+        }
+
+        .login-logo-sub {
+            font-size: 11px;
+            color: var(--text3);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-top: 4px
+        }
+
+        .login-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            color: var(--text);
+            margin-bottom: 4px;
+            text-align: center
+        }
+
+        .login-sub {
+            font-size: 12.5px;
+            color: var(--text3);
+            text-align: center;
+            margin-bottom: 24px
+        }
+
+        .login-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-bottom: 14px
+        }
+
+        .login-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text2)
+        }
+
+        .login-field input {
+            padding: 10px 13px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13.5px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+            transition: border-color .15s
+        }
+
+        .login-field input:focus {
+            border-color: var(--accent)
+        }
+
+        .login-error {
+            background: var(--accent2-light);
+            border: 1px solid #FBBCB8;
+            color: var(--accent2);
+            border-radius: var(--radius-sm);
+            padding: 9px 13px;
+            font-size: 12.5px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            display: none
+        }
+
+        .login-error.show {
+            display: block
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .18s;
+            margin-top: 4px
+        }
+
+        .login-btn:hover {
+            background: #163D5A
+        }
+
+        .login-btn:disabled {
+            opacity: .6;
+            cursor: not-allowed
+        }
+
+        .login-close {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: none;
+            background: var(--surface2);
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .login-close:hover {
+            background: var(--border)
+        }
+
+        /* PATIENT MODAL */
+        .patient-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(26, 23, 20, .5);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 150
+        }
+
+        .patient-modal-overlay.show {
+            display: flex
+        }
+
+        /* ADMIN APP */
+        #admin-app {
+            display: none
+        }
+
+        #admin-app.show {
+            display: flex;
+            height: 100vh;
+            overflow: hidden
+        }
+
+        .sidebar {
+            width: 240px;
+            min-width: 240px;
+            background: var(--text);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden
+        }
+
+        .sidebar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(160deg, #1A2A3A 0%, #1A1714 60%);
+            z-index: 0
+        }
+
+        .sidebar>* {
+            position: relative;
+            z-index: 1
+        }
+
+        .logo {
+            padding: 24px 24px 18px;
+            border-bottom: 1px solid rgba(255, 255, 255, .08)
+        }
+
+        .logo-mark {
+            font-family: 'DM Serif Display', serif;
+            font-size: 15px;
+            color: #fff;
+            letter-spacing: -.2px;
+            line-height: 1.3
+        }
+
+        .logo-mark span {
+            color: #6BC4E8
+        }
+
+        .logo-sub {
+            font-size: 10px;
+            color: rgba(255, 255, 255, .35);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 4px
+        }
+
+        .nav {
+            padding: 16px 12px;
+            flex: 1
+        }
+
+        .nav-section-label {
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, .25);
+            padding: 0 12px;
+            margin: 16px 0 6px
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            color: rgba(255, 255, 255, .55);
+            cursor: pointer;
+            transition: all .15s;
+            font-size: 13.5px;
+            font-weight: 400;
+            margin-bottom: 2px
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, .07);
+            color: rgba(255, 255, 255, .85)
+        }
+
+        .nav-item.active {
+            background: rgba(107, 196, 232, .15);
+            color: #6BC4E8;
+            font-weight: 500
+        }
+
+        .nav-item .icon {
+            font-size: 16px;
+            width: 20px;
+            text-align: center
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--accent2);
+            color: #fff;
+            border-radius: 99px;
+            padding: 1px 7px;
+            font-size: 10px;
+            font-weight: 600;
+            display: none
+        }
+
+        .nav-badge:not(:empty) {
+            display: inline-block
+        }
+
+        .sidebar-footer {
+            padding: 16px 24px;
+            border-top: 1px solid rgba(255, 255, 255, .08)
+        }
+
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6BC4E8, #4A90D9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff
+        }
+
+        .user-name {
+            font-size: 12.5px;
+            color: rgba(255, 255, 255, .75);
+            font-weight: 500
+        }
+
+        .user-role {
+            font-size: 10.5px;
+            color: rgba(255, 255, 255, .35)
+        }
+
+        .logout-btn {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 10px;
+            padding: 7px 10px;
+            border-radius: var(--radius-sm);
+            color: rgba(255, 255, 255, .35);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all .15s;
+            border: none;
+            background: transparent;
+            width: 100%;
+            font-family: 'DM Sans', sans-serif
+        }
+
+        .logout-btn:hover {
+            color: rgba(255, 100, 100, .8);
+            background: rgba(255, 100, 100, .08)
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden
+        }
+
+        .topbar {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 0 28px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-shrink: 0
+        }
+
+        .topbar-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            color: var(--text);
+            flex: 1
+        }
+
+        .topbar-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center
+        }
+
+        .admin-badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 11px;
+            background: var(--accent-light);
+            color: var(--accent);
+            border: 1px solid #B0D4EE;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        .firebase-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 11px;
+            background: #FFF3E0;
+            color: #E65100;
+            border: 1px solid #FFCC80;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        /* BUTTONS */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all .15s
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff
+        }
+
+        .btn-primary:hover {
+            background: #163D5A;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(27, 79, 114, .25)
+        }
+
+        .btn-primary:disabled {
+            opacity: .6;
+            cursor: not-allowed;
+            transform: none
+        }
+
+        .btn-secondary {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text2)
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--border2);
+            color: var(--text)
+        }
+
+        .btn-danger {
+            background: var(--accent2-light);
+            color: var(--accent2);
+            border: 1px solid #FBBCB8
+        }
+
+        .btn-danger:hover {
+            background: #FBCAC7
+        }
+
+        .btn-sm {
+            padding: 5px 11px;
+            font-size: 12px
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 28px
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            position: relative;
+            overflow: hidden;
+            transition: box-shadow .2s
+        }
+
+        .stat-card:hover {
+            box-shadow: var(--shadow)
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px
+        }
+
+        .stat-card.blue::after {
+            background: var(--accent)
+        }
+
+        .stat-card.red::after {
+            background: var(--accent2)
+        }
+
+        .stat-card.green::after {
+            background: var(--green)
+        }
+
+        .stat-card.amber::after {
+            background: var(--amber)
+        }
+
+        .stat-icon {
+            font-size: 22px;
+            margin-bottom: 6px
+        }
+
+        .stat-value {
+            font-family: 'DM Serif Display', serif;
+            font-size: 32px;
+            line-height: 1;
+            color: var(--text)
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text3);
+            font-weight: 500
+        }
+
+        .stat-change {
+            font-size: 11px;
+            margin-top: 4px
+        }
+
+        .stat-change.up {
+            color: var(--green)
+        }
+
+        .stat-change.down {
+            color: var(--accent2)
+        }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 20px
+        }
+
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden
+        }
+
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between
+        }
+
+        .panel-title {
+            font-weight: 600;
+            font-size: 13.5px;
+            color: var(--text)
+        }
+
+        .panel-subtitle {
+            font-size: 12px;
+            color: var(--text3);
+            margin-top: 1px
+        }
+
+        .filter-bar {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: var(--surface2)
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 7px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+            transition: border-color .15s
+        }
+
+        .search-input:focus {
+            border-color: var(--accent)
+        }
+
+        .search-input::placeholder {
+            color: var(--text3)
+        }
+
+        select.filter-select {
+            padding: 7px 10px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 12.5px;
+            background: var(--surface);
+            color: var(--text2);
+            outline: none;
+            cursor: pointer
+        }
+
+        .ticket-table {
+            width: 100%
+        }
+
+        .ticket-table thead tr {
+            border-bottom: 1px solid var(--border)
+        }
+
+        .ticket-table th {
+            padding: 10px 20px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text3);
+            letter-spacing: .8px;
+            text-transform: uppercase;
+            white-space: nowrap
+        }
+
+        .ticket-row {
+            border-bottom: 1px solid var(--border);
+            transition: background .12s;
+            cursor: pointer
+        }
+
+        .ticket-row:last-child {
+            border-bottom: none
+        }
+
+        .ticket-row:hover {
+            background: var(--surface2)
+        }
+
+        .ticket-row.selected {
+            background: var(--accent-light)
+        }
+
+        .ticket-row td {
+            padding: 12px 20px;
+            vertical-align: middle
+        }
+
+        .ticket-id {
+            font-family: 'DM Serif Display', serif;
+            font-size: 13px;
+            color: var(--accent)
+        }
+
+        .ticket-patient {
+            font-weight: 500;
+            font-size: 13px
+        }
+
+        .ticket-detail {
+            font-size: 11.5px;
+            color: var(--text3)
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 9px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600
+        }
+
+        .badge-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%
+        }
+
+        .priority-critical {
+            background: var(--accent2-light);
+            color: var(--accent2)
+        }
+
+        .priority-critical .badge-dot {
+            background: var(--accent2)
+        }
+
+        .priority-high {
+            background: #FFF0E0;
+            color: #C05200
+        }
+
+        .priority-high .badge-dot {
+            background: #E06500
+        }
+
+        .priority-medium {
+            background: var(--amber-light);
+            color: var(--amber)
+        }
+
+        .priority-medium .badge-dot {
+            background: var(--amber)
+        }
+
+        .priority-low {
+            background: var(--green-light);
+            color: var(--green)
+        }
+
+        .priority-low .badge-dot {
+            background: var(--green)
+        }
+
+        .status-open {
+            background: var(--accent-light);
+            color: var(--accent)
+        }
+
+        .status-inprogress {
+            background: var(--purple-light);
+            color: var(--purple)
+        }
+
+        .status-resolved {
+            background: var(--green-light);
+            color: var(--green)
+        }
+
+        .status-closed {
+            background: #EDEDEC;
+            color: var(--text3)
+        }
+
+        .dept-badge {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500
+        }
+
+        .detail-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text3);
+            gap: 8px;
+            padding: 40px;
+            text-align: center;
+            height: 100%
+        }
+
+        .detail-empty .icon {
+            font-size: 40px
+        }
+
+        .detail-content {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px
+        }
+
+        .detail-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 8px
+        }
+
+        .detail-ticket-id {
+            font-family: 'DM Serif Display', serif;
+            font-size: 18px;
+            color: var(--accent)
+        }
+
+        .detail-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+            margin-top: 2px
+        }
+
+        .detail-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            color: var(--text3);
+            margin-bottom: 8px
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px
+        }
+
+        .detail-field label {
+            display: block;
+            font-size: 10.5px;
+            color: var(--text3);
+            margin-bottom: 2px;
+            font-weight: 500
+        }
+
+        .detail-field .value {
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 500
+        }
+
+        .detail-desc {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            font-size: 12.5px;
+            color: var(--text2);
+            line-height: 1.6
+        }
+
+        .priority-select {
+            padding: 9px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+            cursor: pointer;
+            transition: border-color .15s;
+            width: 100%
+        }
+
+        .priority-select:focus {
+            border-color: var(--accent)
+        }
+
+        .timeline {
+            display: flex;
+            flex-direction: column
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 12px;
+            padding-bottom: 14px;
+            position: relative
+        }
+
+        .timeline-item:not(:last-child)::before {
+            content: '';
+            position: absolute;
+            left: 14px;
+            top: 28px;
+            bottom: 0;
+            width: 1px;
+            background: var(--border)
+        }
+
+        .timeline-dot {
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            border-radius: 50%;
+            background: var(--surface);
+            border: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            z-index: 1
+        }
+
+        .timeline-dot.active {
+            border-color: var(--accent);
+            background: var(--accent-light)
+        }
+
+        .timeline-body {
+            flex: 1
+        }
+
+        .timeline-action {
+            font-size: 12.5px;
+            font-weight: 500;
+            color: var(--text)
+        }
+
+        .timeline-meta {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 1px
+        }
+
+        .action-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding-top: 4px;
+            border-top: 1px solid var(--border)
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(26, 23, 20, .5);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100
+        }
+
+        .modal-overlay.show {
+            display: flex
+        }
+
+        .modal {
+            background: var(--surface);
+            border-radius: 16px;
+            width: 520px;
+            max-width: 95vw;
+            box-shadow: var(--shadow-lg);
+            animation: slideUp .2s ease
+        }
+
+        .modal-header {
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between
+        }
+
+        .modal-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 18px
+        }
+
+        .modal-close {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: none;
+            background: var(--surface2);
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .15s
+        }
+
+        .modal-close:hover {
+            background: var(--border)
+        }
+
+        .modal-body {
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px
+        }
+
+        .modal-footer {
+            padding: 14px 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px
+        }
+
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px
+        }
+
+        .form-field.full {
+            grid-column: 1/-1
+        }
+
+        .form-field label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text2)
+        }
+
+        .form-field input,
+        .form-field select,
+        .form-field textarea {
+            padding: 9px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+            transition: border-color .15s;
+            resize: vertical
+        }
+
+        .form-field input:focus,
+        .form-field select:focus,
+        .form-field textarea:focus {
+            border-color: var(--accent)
+        }
+
+        .queue-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background .12s;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start
+        }
+
+        .queue-item:hover {
+            background: var(--surface2)
+        }
+
+        .queue-item:last-child {
+            border-bottom: none
+        }
+
+        .queue-prio {
+            width: 4px;
+            min-width: 4px;
+            border-radius: 99px;
+            align-self: stretch;
+            margin-top: 2px
+        }
+
+        .prio-critical {
+            background: var(--accent2)
+        }
+
+        .prio-high {
+            background: #E06500
+        }
+
+        .prio-medium {
+            background: var(--amber)
+        }
+
+        .prio-low {
+            background: var(--green)
+        }
+
+        .queue-info {
+            flex: 1
+        }
+
+        .queue-name {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--text)
+        }
+
+        .queue-dept {
+            font-size: 11px;
+            color: var(--text3)
+        }
+
+        .queue-time {
+            font-size: 10.5px;
+            color: var(--text3);
+            margin-top: 3px
+        }
+
+        .queue-meta {
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
+            flex-direction: column
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--text);
+            color: #fff;
+            padding: 12px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 999;
+            transform: translateY(80px);
+            opacity: 0;
+            transition: all .3s cubic-bezier(.34, 1.56, .64, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow-lg)
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1
+        }
+
+        ::-webkit-scrollbar {
+            width: 5px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border2);
+            border-radius: 99px
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text3);
+            font-size: 13px
+        }
+
+        .success-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-lg);
+            padding: 44px 40px;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            animation: slideUp .25s ease
+        }
+
+        .success-icon {
+            font-size: 52px;
+            margin-bottom: 14px
+        }
+
+        .success-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 24px;
+            color: var(--text);
+            margin-bottom: 8px
+        }
+
+        .success-sub {
+            font-size: 13.5px;
+            color: var(--text2);
+            margin-bottom: 6px
+        }
+
+        .success-id {
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            color: var(--accent);
+            margin: 10px 0 18px
+        }
+
+        .success-note {
+            font-size: 12px;
+            color: var(--text3);
+            margin-bottom: 24px
+        }
+
+        .success-back-btn {
+            padding: 11px 28px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s
+        }
+
+        .success-back-btn:hover {
+            background: #163D5A
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: relative;
+            z-index: 1
+        }
+
+        .lang-switcher {
+            display: flex;
+            gap: 4px;
+            background: rgba(255, 255, 255, .08);
+            border: 1px solid rgba(255, 255, 255, .15);
+            border-radius: var(--radius-sm);
+            padding: 3px
+        }
+
+        .lang-btn {
+            padding: 5px 12px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, .5);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all .15s
+        }
+
+        .lang-btn:hover {
+            color: rgba(255, 255, 255, .85)
+        }
+
+        .lang-btn.active {
+            background: rgba(107, 196, 232, .25);
+            color: #6BC4E8;
+            font-weight: 600
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ══ PATIENT PAGE ═══════════════════════════════════════════════════════════ -->
+    <div id="patient-page">
+        <header class="public-header">
+            <div>
+                <div class="pub-logo-mark">St. Camillus <span>Medical Center</span></div>
+                <div class="pub-logo-sub">Hospital Ticketing System</div>
+            </div>
+            <div class="header-right">
+                <button class="dark-mode-toggle" onclick="toggleDarkMode()" title="Switch to Dark Mode">🌙</button>
+                <div class="lang-switcher">
+                    <button class="lang-btn active" data-lang="en" onclick="setLang('en')">🇺🇸 English</button>
+                    <button class="lang-btn" data-lang="fil" onclick="setLang('fil')">🇵🇭 Filipino</button>
+                </div>
+                <button class="admin-login-btn" id="admin-login-btn" onclick="openLoginModal()">🔐 Admin Login</button>
+            </div>
+        </header>
+        <div class="public-hero" id="public-hero-content">
+            <div class="hero-badge">🏥 Hospital Support Portal</div>
+            <h1 class="hero-title">How can we <span>help you</span> today?</h1>
+            <p class="hero-sub">Submit a support request and our staff will assist you as quickly as possible. Your
+                concern goes directly to the right team.</p>
+            <div class="submit-card">
+                <div class="submit-card-title">Submit a New Ticket</div>
+                <div class="submit-card-sub">Fill out a brief form and we'll follow up shortly</div>
+                <div class="steps-row">
+                    <div class="step-item">
+                        <div class="step-num">1</div>
+                        <div class="step-label">Fill the form</div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-num">2</div>
+                        <div class="step-label">Submit request</div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-num">3</div>
+                        <div class="step-label">Staff responds</div>
+                    </div>
+                </div>
+                <button class="public-submit-btn" onclick="openPatientModal()">📋 Submit a New Ticket</button>
+            </div>
+        </div>
+        <footer class="public-footer" id="public-footer">© 2025 St. Camillus Medical Center · Hospital Ticketing System
+        </footer>
+    </div>
+
+    <!-- ══ LOGIN MODAL ════════════════════════════════════════════════════════════ -->
+    <div class="login-overlay" id="login-overlay" onclick="closeLoginOutside(event)">
+        <div class="login-box">
+            <button class="login-close" onclick="closeLoginModal()">✕</button>
+            <div class="login-logo">
+                <div class="login-logo-mark">St. Camillus <span>Medical Center</span></div>
+                <div class="login-logo-sub">Admin Portal · Firebase Auth</div>
+            </div>
+            <div class="login-title">Sign in</div>
+            <div class="login-sub">Use your Firebase admin account credentials</div>
+            <div class="login-error" id="login-error"></div>
+            <div class="login-field">
+                <label>Email</label>
+                <input type="email" id="login-user" placeholder="admin@scmc.com"
+                    onkeydown="if(event.key==='Enter')doLogin()">
+            </div>
+            <div class="login-field">
+                <label>Password</label>
+                <input type="password" id="login-pass" placeholder="••••••••"
+                    onkeydown="if(event.key==='Enter')doLogin()">
+            </div>
+            <button class="login-btn" onclick="doLogin()">Sign In →</button>
+        </div>
+    </div>
+
+    <!-- ══ PATIENT TICKET MODAL ═══════════════════════════════════════════════════ -->
+    <div class="patient-modal-overlay" id="patient-modal-overlay" onclick="closePatientOutside(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="patient-modal-title">Submit a Support Request</div>
+                <button class="modal-close" onclick="closePatientModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-field"><label id="lbl-p-patient">Your Name *</label><input type="text"
+                            id="p-patient" placeholder="Full name"></div>
+                    <div class="form-field"><label id="lbl-p-pid">Patient ID (if known)</label><input type="text"
+                            id="p-pid" placeholder="PT-XXXXXX"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label id="lbl-p-dept">Department / Ward *</label>
+                        <select id="p-dept">
+                            <option value="">Select department</option>
+                            <option>Emergency</option>
+                            <option>Cardiology</option>
+                            <option>Orthopedics</option>
+                            <option>Pediatrics</option>
+                            <option>Neurology</option>
+                            <option>Radiology</option>
+                            <option>General Medicine</option>
+                            <option>ICU</option>
+                            <option>Surgery</option>
+                            <option>Pharmacy</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label id="lbl-p-category">Issue Category *</label>
+                        <select id="p-category">
+                            <option value="">Select category</option>
+                            <option>Equipment Malfunction</option>
+                            <option>Medication Request</option>
+                            <option>Patient Transfer</option>
+                            <option>Lab Results</option>
+                            <option>Billing Issue</option>
+                            <option>Nurse Call</option>
+                            <option>Housekeeping</option>
+                            <option>IT Support</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-field full"><label id="lbl-p-title">Issue Summary *</label><input type="text"
+                        id="p-title" placeholder="Brief description of your concern"></div>
+                <div class="form-field full"><label id="lbl-p-desc">Details / Notes</label><textarea id="p-desc"
+                        rows="3" placeholder="Additional information or context…"></textarea></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="patient-cancel-btn" onclick="closePatientModal()">Cancel</button>
+                <button class="btn btn-primary" id="patient-submit-btn" onclick="submitPatientTicket()">Submit
+                    Request</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ ADMIN APP ══════════════════════════════════════════════════════════════ -->
+    <div id="admin-app">
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-mark">St. Camillus <span>Medical Center</span></div>
+                <div class="logo-sub">Admin Dashboard</div>
+            </div>
+            <nav class="nav">
+                <div class="nav-item active" onclick="navigate('dashboard',event)"><span class="icon">🏠</span>
+                    Dashboard</div>
+                <div class="nav-item" onclick="navigate('tickets',event)"><span class="icon">🎫</span> All Tickets<span
+                        class="nav-badge" id="open-count">—</span></div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-card">
+                    <div class="user-avatar" id="admin-avatar">A</div>
+                    <div>
+                        <div class="user-name" id="admin-name">Admin</div>
+                        <div class="user-role">Administrator</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="doLogout()">⬅ Sign Out</button>
+            </div>
+        </aside>
+        <main class="main">
+            <header class="topbar">
+                <div class="topbar-title" id="page-title">Dashboard</div>
+                <div class="topbar-actions">
+                    <button class="dark-mode-toggle" onclick="toggleDarkMode()" title="Switch to Dark Mode">🌙</button>
+                    <button class="btn btn-primary" onclick="openAdminModal()">＋ New Ticket</button>
+                </div>
+            </header>
+            <div class="content" id="main-content">
+                <div
+                    style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:14px;gap:8px;">
+                    🔥 Connecting to Firestore…
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ADMIN NEW TICKET MODAL -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModalOutside(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">New Support Ticket</div>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-field"><label>Patient Name *</label><input type="text" id="f-patient"
+                            placeholder="Full name"></div>
+                    <div class="form-field"><label>Patient ID</label><input type="text" id="f-pid"
+                            placeholder="PT-XXXXXX"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Department *</label>
+                        <select id="f-dept">
+                            <option value="">Select department</option>
+                            <option>Emergency</option>
+                            <option>Cardiology</option>
+                            <option>Orthopedics</option>
+                            <option>Pediatrics</option>
+                            <option>Neurology</option>
+                            <option>Radiology</option>
+                            <option>General Medicine</option>
+                            <option>ICU</option>
+                            <option>Surgery</option>
+                            <option>Pharmacy</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>Priority *</label>
+                        <select id="f-priority">
+                            <option value="">Select priority</option>
+                            <option value="critical">🔴 Critical</option>
+                            <option value="high">🟠 High</option>
+                            <option value="medium">🟡 Medium</option>
+                            <option value="low">🟢 Low</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Issue Category *</label>
+                        <select id="f-category">
+                            <option value="">Select category</option>
+                            <option>Equipment Malfunction</option>
+                            <option>Medication Request</option>
+                            <option>Patient Transfer</option>
+                            <option>Lab Results</option>
+                            <option>Billing Issue</option>
+                            <option>Nurse Call</option>
+                            <option>Housekeeping</option>
+                            <option>IT Support</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-field full"><label>Issue Summary *</label><input type="text" id="f-title"
+                        placeholder="Brief description of the issue"></div>
+                <div class="form-field full"><label>Details / Notes</label><textarea id="f-desc" rows="3"
+                        placeholder="Additional information…"></textarea></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createTicket()">Create Ticket</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST -->
+    <div class="toast" id="toast"><span id="toast-msg">Done</span></div>
+
+</body>
+
+</html>
